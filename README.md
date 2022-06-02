@@ -70,6 +70,12 @@ Execute the following command.
 
     java -jar digitallibrary-0.0.1-SNAPSHOT.jar
 
+## Send request to the application
+
+You have to add the search term into the request query parameter.
+
+    curl --location --request GET 'http://localhost:8083/library/itemList?term=hello'  
+
 ## Limit of results on upstream services
 You can limit the number of records retrieved from the upstream service by changing the value of response.entityLimit value in the desired application.properties file (application-dev.properties/ application-prod.properties).
 
