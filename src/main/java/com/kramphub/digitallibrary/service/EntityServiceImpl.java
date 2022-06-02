@@ -1,46 +1,35 @@
 package com.kramphub.digitallibrary.service;
 
-import com.kramphub.digitallibrary.dao.Album;
-import com.kramphub.digitallibrary.dao.Book;
-import com.kramphub.digitallibrary.dao.LibraryItem;
-import com.kramphub.digitallibrary.exception.NoRecordException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
-import org.apache.http.config.Registry;
-import org.apache.http.config.RegistryBuilder;
-import org.apache.http.conn.socket.ConnectionSocketFactory;
-import org.apache.http.conn.socket.PlainConnectionSocketFactory;
-import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
-import org.apache.http.conn.ssl.TrustStrategy;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
-import org.apache.http.ssl.SSLContextBuilder;
+import org.json.JSONObject;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.security.KeyManagementException;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+
+import com.kramphub.digitallibrary.dao.*;
+import com.kramphub.digitallibrary.exception.NoRecordException;
 
 /**
- *  EntityServiceImpl Class implements the methods defined in  {@link EntityService} Interface.
- *  This service uses Google Book API and iTunes API as upstream services to retrieve {@link Album} and {@link Book} data
+ * EntityServiceImpl Class implements the methods defined in  {@link EntityService} Interface.
+ * This service uses Google Book API and iTunes API as upstream services to retrieve {@link Album} and {@link Book} data
  * * @author Kaveesha Baddage
  * *
  */
@@ -57,6 +46,9 @@ public class EntityServiceImpl implements EntityService {
     private static final String ITUNES_ALBUM_API_ALBUM_ENTITY = "album";
     private HttpClient client;
 
+    private BeanFactory beanFactory;
+    private final WebClient.Builder webClientBuilder;
+    private
     @Value("${google.book.url}")
     String googleBookAPIUrl;
 
@@ -66,31 +58,16 @@ public class EntityServiceImpl implements EntityService {
     @Value("${response.entityLimit}")
     Integer resultLimit;
 
-    public EntityServiceImpl() throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
-        if (client == null) {
-            // Initiate http connection if it is not exist
-            initiateConnection();
-        }
+
+    @Value("${response.waitTime}")
+    int waitTIme;
+
+    public EntityServiceImpl(WebClient.Builder webClientBuilder, BeanFactory beanFactory) {
+        this.webClientBuilder = webClientBuilder;
+        this.beanFactory = beanFactory;
+
     }
 
-    private void initiateConnection() throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
-
-        HttpClientBuilder httpClientBuilder = HttpClientBuilder.create();
-        SSLContext sslContext = new SSLContextBuilder().loadTrustMaterial(null, new TrustStrategy() {
-            @Override
-            public boolean isTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
-                return true;
-            }
-        }).build();
-        httpClientBuilder.setSSLContext(sslContext);
-        HostnameVerifier hostnameVerifier = SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER;
-        SSLConnectionSocketFactory sslSocketFactory = new SSLConnectionSocketFactory(sslContext, hostnameVerifier);
-        Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory>create().
-                register("http", PlainConnectionSocketFactory.getSocketFactory()).register("https", sslSocketFactory).build();
-        PoolingHttpClientConnectionManager connMgr = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
-        httpClientBuilder.setConnectionManager(connMgr);
-        client = httpClientBuilder.build();
-    }
 
     @Override
     public List<LibraryItem> findByKeyword(String keyword) throws URISyntaxException, IOException {
@@ -108,13 +85,26 @@ public class EntityServiceImpl implements EntityService {
         // Create HTTP request to call Google Book API
         HttpGet googleRequest = new HttpGet(googleBookAPIUrl);
 
+
         URI bookSearchURI = new URIBuilder(googleRequest.getURI())
                 .addParameter(GOOGLE_BOOK_API_QUERY_PARAM, keyword)
                 .addParameter(GOOGLE_BOOK_API_RESULT_LIMIT_PARAM, String.valueOf(resultLimit))
                 .build();
 
-        googleRequest.setURI(bookSearchURI);
 
+        //Get bookList from Google Book API in synchronous way
+        Mono<GoogleBookAPIResult> asyncBookItems = (Mono<GoogleBookAPIResult>) beanFactory.getBean("asyncWebClient", bookSearchURI);
+        asyncBookItems.subscribe(bookItems -> {
+            log.info("Num of items in Google Book API: {}", bookItems.getTotalItems());
+            if (bookItems.getTotalItems() > 0) {
+                ArrayList<GoogleBookItem> booksData = bookItems.getItems();
+                for (GoogleBookItem book : booksData) {
+                    GoogleBookItem.VolumeInfo volume = book.getVolumeInfo();
+                    LibraryItem libraryItem = new LibraryItem(volume.getTitle(), volume.getAuthors(), "Book");
+                    libraryItemList.add(libraryItem);
+                }
+            }
+        });
 
         // Create  HTTP request  to call iTunes Album API
         HttpGet itunesRequest = new HttpGet(itunesAlbumAPIUrl);
@@ -125,27 +115,42 @@ public class EntityServiceImpl implements EntityService {
                 .addParameter(ITUNES_API_ENTITY_QUERY_PARAM, ITUNES_ALBUM_API_ALBUM_ENTITY)
                 .build();
 
-        itunesRequest.setURI(albumSearchURI);
-
-        //Get bookList from Google Book API
-        final Future<List<LibraryItem>> futureBooks = executorService.submit(new FutureBookService(client,
-                googleRequest));
-        futureLibraryItemList.add(futureBooks);
+        // itunesRequest.setURI(albumSearchURI);
 
         //Get albumList from iTunes API
-        final Future<List<LibraryItem>> futureAlbums = executorService.submit(new FutureAlbumService(client,
-                itunesRequest));
-        futureLibraryItemList.add(futureAlbums);
-
-        //get result from Future
-        for (final Future<List<LibraryItem>> futureItem : futureLibraryItemList) {
+        Mono<String> asyncAlbumItems = (Mono<String>)
+                beanFactory.getBean("asyncItunesWebClient", albumSearchURI);
+        asyncAlbumItems.subscribe(albumItems -> {
+            log.info("Items in iTunes API: {}", albumItems);
+            JSONObject result = new JSONObject(albumItems);
+            ObjectMapper objectMapper = new ObjectMapper();
+            objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+            ITunesAlbumAPIResult iTunesAlbumAPIResult;
             try {
-                libraryItemList.addAll(futureItem.get(5, TimeUnit.SECONDS));
-            } catch (Exception ex) {
-                log.error("Error while getting future objects ", ex);
-                continue;
+                iTunesAlbumAPIResult = objectMapper.readValue(result.toString(), ITunesAlbumAPIResult.class);
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
             }
+            if (iTunesAlbumAPIResult.getResultCount() == 0) {
+                log.error("No data retrieved from the Itunes API");
+            } else {
+                for (ItunesAlbumItem itunesAlbum : iTunesAlbumAPIResult.getResults()) {
+                    LibraryItem libraryItem = new LibraryItem(itunesAlbum.getCollectionName(),
+                            Arrays.asList(itunesAlbum.getArtistName().split(",")),
+                            "Album");
+                    libraryItemList.add(libraryItem);
+                }
+            }
+
+        });
+
+        //Wait the main thread until predefined time period to complete upstream services
+        try {
+            Thread.sleep(waitTIme);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
+
 
         if (libraryItemList.isEmpty()) {
             throw new NoRecordException("Data not found for input term : " + keyword);
@@ -153,7 +158,7 @@ public class EntityServiceImpl implements EntityService {
 
         //Sort results
         Collections.sort(libraryItemList);
-        log.info("Num of retrieved data for keyword:" + keyword + " = " + libraryItemList.size() );
+        log.info("Num of retrieved data for keyword:" + keyword + " = " + libraryItemList.size());
 
         return libraryItemList;
 

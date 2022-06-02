@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
  * * @author Kaveesha Baddage
  * *
  */
-@ResponseStatus(HttpStatus.BAD_REQUEST)
+@ResponseStatus(value = HttpStatus.BAD_REQUEST)
 public class NoRecordException extends RuntimeException {
 
     public NoRecordException(String ex) {

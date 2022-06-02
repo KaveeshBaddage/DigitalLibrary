@@ -1,7 +1,5 @@
 package com.kramphub.digitallibrary.controller;
 
-import com.kramphub.digitallibrary.dao.LibraryItem;
-import com.kramphub.digitallibrary.service.EntityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -15,8 +13,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
 import java.util.List;
+
+import com.kramphub.digitallibrary.dao.LibraryItem;
+import com.kramphub.digitallibrary.service.EntityService;
 
 /**
  * REST Controller class to handle REST API endpoints to retrieve Book and album
