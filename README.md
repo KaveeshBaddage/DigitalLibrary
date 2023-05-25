@@ -62,7 +62,7 @@ You can run the application with the desired environment properties by adding th
 
     java -jar digitallibrary-0.0.1-SNAPSHOT.jar --spring.profiles.active=<env>
     
-Ex :- java -jar digitallibrary-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+Ex :- java -jar digitallibrary-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod | 
       java -jar digitallibrary-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev
       
 ##### B. Run the application with the mentioned environment in the application.properties file
